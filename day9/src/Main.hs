@@ -51,11 +51,11 @@ data Registers = Registers
 data Instruction
   = Add { a :: Arg
         , b :: Arg
-        , dst :: Addr }
+        , dst :: Arg }
   | Mult { a :: Arg
          , b :: Arg
-         , dst :: Addr }
-  | Input { dst :: Addr }
+         , dst :: Arg }
+  | Input { odst :: Arg }
   | Output { odst :: Arg }
   | JmpIfTrue { a :: Arg
               , b :: Arg }
@@ -63,10 +63,10 @@ data Instruction
                , b :: Arg }
   | LessThan { a :: Arg
              , b :: Arg
-             , c :: Addr }
+             , c :: Arg }
   | Equals { a :: Arg
            , b :: Arg
-           , c :: Addr }
+           , c :: Arg }
   | ModifyRelBase { a :: Arg}
   | Terminate
   | Unknown { op :: MWord }
@@ -96,15 +96,26 @@ memFetch addr = do
   (pure . fromMaybe 0 . Map.lookup addr) (memory s)
 
 memFetchRelative :: RelAddr -> State System MWord
-memFetchRelative addr = do
-  s <- get
-  let base = relativeBase (registers s)
-      lookupAddr = Addr (base + (unRelAddr addr))
-  (pure . fromMaybe 0 . Map.lookup lookupAddr) (memory s)
-
+memFetchRelative relAddr = do
+  addr <- resolveAddr relAddr
+  memFetch addr
+  
 memStore :: Addr -> MWord -> State System ()
 memStore addr value =
   modify (\s -> s {memory = (Map.insert addr value (memory s))})
+
+memStoreRelative :: RelAddr -> MWord -> State System ()
+memStoreRelative relAddr value = do
+  addr <- resolveAddr relAddr
+  memStore addr value
+
+resolveAddr :: RelAddr -> State System Addr
+resolveAddr addr = do
+  s <- get
+  let base = relativeBase (registers s)
+      actualAddr = Addr (base + (unRelAddr addr))
+  pure actualAddr
+
 
 acceptInput :: Addr -> State System ()
 acceptInput dst = do
@@ -113,77 +124,148 @@ acceptInput dst = do
   memStore dst x
   modify (\s -> s {input = xs})
 
+acceptInputRelative :: RelAddr -> State System ()
+acceptInputRelative addr = do
+  actualAddr <- resolveAddr addr
+  acceptInput actualAddr
+
 produceOutput :: MWord -> State System ()
 produceOutput value = modify (\s -> s {output = output s ++ [value]})
 
 runInstruction :: Instruction -> State System ()
 runInstruction op =
   case op of
-    Add (Position a) (Position b) dst -> do
+    Add (Position a) (Position b) (Position dst) -> do
       x <- memFetch a
       y <- memFetch b
       memStore dst (x + y)
-    Add (Immediate a) (Position b) dst -> do
+    Add (Immediate a) (Position b) (Position dst) -> do
       x <- memFetch b
       memStore dst (x + a)
-    Add (Position a) (Immediate b) dst -> do
+    Add (Position a) (Immediate b) (Position dst) -> do
       x <- memFetch a
       memStore dst (x + b)
-    Add (Immediate a) (Immediate b) dst -> memStore dst (a + b)
+    Add (Immediate a) (Immediate b) (Position dst) -> memStore dst (a + b)
 
-    Add (Position a) (Relative b) dst -> do
+    Add (Position a) (Relative b) (Position dst) -> do
       x <- memFetch a
       y <- memFetchRelative b
       memStore dst (x + y)
-    Add (Relative a) (Position b) dst -> do
+    Add (Relative a) (Position b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetch b
       memStore dst (x + y)
-    Add (Immediate a) (Relative b) dst -> do
+    Add (Immediate a) (Relative b) (Position dst) -> do
       y <- memFetchRelative b
       memStore dst (a + y)
-    Add (Relative a) (Immediate b) dst -> do
+    Add (Relative a) (Immediate b) (Position dst) -> do
       x <- memFetchRelative a
       memStore dst (x + b)
-    Add (Relative a) (Relative b) dst -> do
+    Add (Relative a) (Relative b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetchRelative b
       memStore dst (x + y)
 
+    -- Rel
+    Add (Position a) (Position b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetch b
+      memStoreRelative dst (x + y)
+    Add (Immediate a) (Position b) (Relative dst) -> do
+      x <- memFetch b
+      memStoreRelative dst (x + a)
+    Add (Position a) (Immediate b) (Relative dst) -> do
+      x <- memFetch a
+      memStoreRelative dst (x + b)
+    Add (Immediate a) (Immediate b) (Relative dst) -> memStoreRelative dst (a + b)
 
-    Mult (Position a) (Position b) dst -> do
+    Add (Position a) (Relative b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetchRelative b
+      memStoreRelative dst (x + y)
+    Add (Relative a) (Position b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetch b
+      memStoreRelative dst (x + y)
+    Add (Immediate a) (Relative b) (Relative dst) -> do
+      y <- memFetchRelative b
+      memStoreRelative dst (a + y)
+    Add (Relative a) (Immediate b) (Relative dst) -> do
+      x <- memFetchRelative a
+      memStoreRelative dst (x + b)
+    Add (Relative a) (Relative b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetchRelative b
+      memStoreRelative dst (x + y)
+    --
+
+
+    Mult (Position a) (Position b) (Position dst) -> do
       x <- memFetch a
       y <- memFetch b
       memStore dst (x * y)
-    Mult (Immediate a) (Position b) dst -> do
+    Mult (Immediate a) (Position b) (Position dst) -> do
       x <- memFetch b
       memStore dst (x * a)
-    Mult (Position a) (Immediate b) dst -> do
+    Mult (Position a) (Immediate b) (Position dst) -> do
       x <- memFetch a
       memStore dst (x * b)
-    Mult (Immediate a) (Immediate b) dst -> memStore dst (a * b)
+    Mult (Immediate a) (Immediate b) (Position dst) -> memStore dst (a * b)
 
-    Mult (Position a) (Relative b) dst -> do
+    Mult (Position a) (Relative b) (Position dst) -> do
       x <- memFetch a
       y <- memFetchRelative b
       memStore dst (x * y)
-    Mult (Relative a) (Position b) dst -> do
+    Mult (Relative a) (Position b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetch b
       memStore dst (x * y)
-    Mult (Immediate a) (Relative b) dst -> do
+    Mult (Immediate a) (Relative b) (Position dst) -> do
       y <- memFetchRelative b
       memStore dst (a * y)
-    Mult (Relative a) (Immediate b) dst -> do
+    Mult (Relative a) (Immediate b) (Position dst) -> do
       x <- memFetchRelative a
       memStore dst (x * b)
-    Mult (Relative a) (Relative b) dst -> do
+    Mult (Relative a) (Relative b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetchRelative b
       memStore dst (x * y)
 
+    -- Rel
+    Mult (Position a) (Position b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetch b
+      memStoreRelative dst (x * y)
+    Mult (Immediate a) (Position b) (Relative dst) -> do
+      x <- memFetch b
+      memStoreRelative dst (x * a)
+    Mult (Position a) (Immediate b) (Relative dst) -> do
+      x <- memFetch a
+      memStoreRelative dst (x * b)
+    Mult (Immediate a) (Immediate b) (Relative dst) -> memStoreRelative dst (a * b)
 
-    Input addr -> acceptInput addr
+    Mult (Position a) (Relative b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetchRelative b
+      memStoreRelative dst (x * y)
+    Mult (Relative a) (Position b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetch b
+      memStoreRelative dst (x * y)
+    Mult (Immediate a) (Relative b) (Relative dst) -> do
+      y <- memFetchRelative b
+      memStoreRelative dst (a * y)
+    Mult (Relative a) (Immediate b) (Relative dst) -> do
+      x <- memFetchRelative a
+      memStoreRelative dst (x * b)
+    Mult (Relative a) (Relative b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetchRelative b
+      memStoreRelative dst (x * y)
+
+    Input (Position addr) -> acceptInput addr
+    Input (Relative addr) -> acceptInputRelative addr
+
     Output (Position addr) -> memFetch addr >>= produceOutput
     Output (Immediate value) -> produceOutput value
     Output (Relative addr) -> memFetchRelative addr >>= produceOutput
@@ -290,110 +372,213 @@ runInstruction op =
 
 
 
-    LessThan (Position a) (Position b) dst -> do
+    LessThan (Position a) (Position b) (Position dst) -> do
       x <- memFetch a
       y <- memFetch b
       if x < y
         then memStore dst 1
         else memStore dst 0
-    LessThan (Immediate a) (Position b) dst -> do
+    LessThan (Immediate a) (Position b) (Position dst) -> do
       x <- memFetch b
       if a < x
         then memStore dst 1
         else memStore dst 0
-    LessThan (Position a) (Immediate b) dst -> do
+    LessThan (Position a) (Immediate b) (Position dst) -> do
       x <- memFetch a
       if x < b
         then memStore dst 1
         else memStore dst 0
-    LessThan (Immediate a) (Immediate b) dst ->
+    LessThan (Immediate a) (Immediate b) (Position dst) ->
       if a < b
         then memStore dst 1
         else memStore dst 0
 
-    LessThan (Position a) (Relative b) dst -> do
+    LessThan (Position a) (Relative b) (Position dst) -> do
       x <- memFetch a
       y <- memFetchRelative b
       if x < y
         then memStore dst 1
         else memStore dst 0
-    LessThan (Relative a) (Position b) dst -> do
+    LessThan (Relative a) (Position b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetch b
       if x < y
         then memStore dst 1
         else memStore dst 0
-    LessThan (Immediate a) (Relative b) dst -> do
+    LessThan (Immediate a) (Relative b) (Position dst) -> do
       y <- memFetchRelative b
       if a < y
         then memStore dst 1
         else memStore dst 0
-    LessThan (Relative a) (Immediate b) dst -> do 
+    LessThan (Relative a) (Immediate b) (Position dst) -> do 
       x <- memFetchRelative a
       if x < b
         then memStore dst 1
         else memStore dst 0
-    LessThan (Relative a) (Relative b) dst -> do 
+    LessThan (Relative a) (Relative b) (Position dst) -> do 
       x <- memFetchRelative a
       y <- memFetchRelative b
       if x < y
         then memStore dst 1
         else memStore dst 0
 
+    -- Rel
+    LessThan (Position a) (Position b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetch b
+      if x < y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Immediate a) (Position b) (Relative dst) -> do
+      x <- memFetch b
+      if a < x
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Position a) (Immediate b) (Relative dst) -> do
+      x <- memFetch a
+      if x < b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Immediate a) (Immediate b) (Relative dst) ->
+      if a < b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+
+    LessThan (Position a) (Relative b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetchRelative b
+      if x < y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Relative a) (Position b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetch b
+      if x < y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Immediate a) (Relative b) (Relative dst) -> do
+      y <- memFetchRelative b
+      if a < y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Relative a) (Immediate b) (Relative dst) -> do 
+      x <- memFetchRelative a
+      if x < b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    LessThan (Relative a) (Relative b) (Relative dst) -> do 
+      x <- memFetchRelative a
+      y <- memFetchRelative b
+      if x < y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
 
 
 
-    Equals (Position a) (Position b) dst -> do
+    Equals (Position a) (Position b) (Position dst) -> do
       x <- memFetch a
       y <- memFetch b
       if x == y
         then memStore dst 1
         else memStore dst 0
-    Equals (Immediate a) (Position b) dst -> do
+    Equals (Immediate a) (Position b) (Position dst) -> do
       x <- memFetch b
       if a == x
         then memStore dst 1
         else memStore dst 0
-    Equals (Position a) (Immediate b) dst -> do
+    Equals (Position a) (Immediate b) (Position dst) -> do
       x <- memFetch a
       if x == b
         then memStore dst 1
         else memStore dst 0
-    Equals (Immediate a) (Immediate b) dst ->
+    Equals (Immediate a) (Immediate b) (Position dst) ->
       if a == b
         then memStore dst 1
         else memStore dst 0
 
 
     
-    Equals (Position a) (Relative b) dst -> do
+    Equals (Position a) (Relative b) (Position dst) -> do
       x <- memFetch a
       y <- memFetchRelative b
       if x == y
         then memStore dst 1
         else memStore dst 0
-    Equals (Relative a) (Position b) dst -> do
+    Equals (Relative a) (Position b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetch b
       if x == y
         then memStore dst 1
         else memStore dst 0
-    Equals (Immediate a) (Relative b) dst -> do
+    Equals (Immediate a) (Relative b) (Position dst) -> do
       y <- memFetchRelative b
       if a == y
         then memStore dst 1
         else memStore dst 0
-    Equals (Relative a) (Immediate b) dst -> do
+    Equals (Relative a) (Immediate b) (Position dst) -> do
       x <- memFetchRelative a
       if x == b
         then memStore dst 1
         else memStore dst 0
-    Equals (Relative a) (Relative b) dst -> do
+    Equals (Relative a) (Relative b) (Position dst) -> do
       x <- memFetchRelative a
       y <- memFetchRelative b
       if x == y
         then memStore dst 1
         else memStore dst 0
+
+    -- Rel
+    Equals (Position a) (Position b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetch b
+      if x == y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Immediate a) (Position b) (Relative dst) -> do
+      x <- memFetch b
+      if a == x
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Position a) (Immediate b) (Relative dst) -> do
+      x <- memFetch a
+      if x == b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Immediate a) (Immediate b) (Relative dst) ->
+      if a == b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+
+
+    
+    Equals (Position a) (Relative b) (Relative dst) -> do
+      x <- memFetch a
+      y <- memFetchRelative b
+      if x == y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Relative a) (Position b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetch b
+      if x == y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Immediate a) (Relative b) (Relative dst) -> do
+      y <- memFetchRelative b
+      if a == y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Relative a) (Immediate b) (Relative dst) -> do
+      x <- memFetchRelative a
+      if x == b
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
+    Equals (Relative a) (Relative b) (Relative dst) -> do
+      x <- memFetchRelative a
+      y <- memFetchRelative b
+      if x == y
+        then memStoreRelative dst 1
+        else memStoreRelative dst 0
 
 
     ModifyRelBase (Immediate a) -> addToRelativeBase a
@@ -420,30 +605,56 @@ runInstructionLogged instruction = do
   runInstruction instruction
 
 parseInstructions :: [OpCode] -> Instruction
-parseInstructions (OpCode 1:a:b:c:xs) = Add (Position (toAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 1001:a:b:c:xs) = Add (Position (toAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 1101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Immediate (unOpCode b)) (toAddr c)
+parseInstructions (OpCode 1:a:b:c:xs) = Add (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1001:a:b:c:xs) = Add (Position (toAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 1101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Position (toAddr c))
 
-parseInstructions (OpCode 201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 2001:a:b:c:xs) = Add (Position (toAddr a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 1201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 2101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 2201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Relative (toRelAddr b)) (toAddr c)
+parseInstructions (OpCode 201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2001:a:b:c:xs) = Add (Position (toAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 2101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
 
 
-parseInstructions (OpCode 2:a:b:c:xs) = Mult (Position (toAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 1002:a:b:c:xs) = Mult (Position (toAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 1102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Immediate (unOpCode b)) (toAddr c)
+parseInstructions (OpCode 2:a:b:c:xs) = Mult (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1002:a:b:c:xs) = Mult (Position (toAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 1102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Position (toAddr c))
 
-parseInstructions (OpCode 202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 2002:a:b:c:xs) = Mult (Position (toAddr a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 1202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 2102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 2202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Relative (toRelAddr b)) (toAddr c)
+parseInstructions (OpCode 202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2002:a:b:c:xs) = Mult (Position (toAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 2102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
 
-parseInstructions (OpCode 3:a:xs) = Input (toAddr a)
+-- Relative destination
+parseInstructions (OpCode 20001:a:b:c:xs) = Add (Position (toAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 20101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21001:a:b:c:xs) = Add (Position (toAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+
+parseInstructions (OpCode 20201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22001:a:b:c:xs) = Add (Position (toAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22201:a:b:c:xs) = Add (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+
+
+parseInstructions (OpCode 20002:a:b:c:xs) = Mult (Position (toAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 20102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21002:a:b:c:xs) = Mult (Position (toAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+
+parseInstructions (OpCode 20202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22002:a:b:c:xs) = Mult (Position (toAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22102:a:b:c:xs) = Mult (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22202:a:b:c:xs) = Mult (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+---
+
+parseInstructions (OpCode 3:a:xs) = Input (Position (toAddr a))
+parseInstructions (OpCode 203:a:xs) = Input (Relative (toRelAddr a))
 
 parseInstructions (OpCode 4:a:xs) = Output (Position (toAddr a))
 parseInstructions (OpCode 104:a:xs) = Output (Immediate (unOpCode a))
@@ -472,27 +683,51 @@ parseInstructions (OpCode 1206:a:b:xs) = JmpIfFalse (Relative (toRelAddr a)) (Im
 parseInstructions (OpCode 2106:a:b:xs) = JmpIfFalse (Immediate (unOpCode a)) (Immediate (unOpCode b))
 parseInstructions (OpCode 2206:a:b:xs) = JmpIfFalse (Relative (toRelAddr a)) (Relative (toRelAddr b))
 
-parseInstructions (OpCode 7:a:b:c:xs) = LessThan (Position (toAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 1007:a:b:c:xs) = LessThan (Position (toAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 1107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Immediate (unOpCode b)) (toAddr c)
+parseInstructions (OpCode 7:a:b:c:xs) = LessThan (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1007:a:b:c:xs) = LessThan (Position (toAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 1107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Position (toAddr c))
 
-parseInstructions (OpCode 207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 2007:a:b:c:xs) = LessThan (Position (toAddr a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 1207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 2107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 2207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Relative (toRelAddr b)) (toAddr c)
+parseInstructions (OpCode 207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2007:a:b:c:xs) = LessThan (Position (toAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 2107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
 
-parseInstructions (OpCode 8:a:b:c:xs) = Equals (Position (toAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 1008:a:b:c:xs) = Equals (Position (toAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 1108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Immediate (unOpCode b)) (toAddr c)
+parseInstructions (OpCode 8:a:b:c:xs) = Equals (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1008:a:b:c:xs) = Equals (Position (toAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 1108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Position (toAddr c))
 
-parseInstructions (OpCode 208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Position (toAddr b)) (toAddr c)
-parseInstructions (OpCode 2008:a:b:c:xs) = Equals (Position (toAddr a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 1208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Immediate (unOpCode b)) (toAddr c)
-parseInstructions (OpCode 2108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Relative (toRelAddr b)) (toAddr c)
-parseInstructions (OpCode 2208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Relative (toRelAddr b)) (toAddr c)
+parseInstructions (OpCode 208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Position (toAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2008:a:b:c:xs) = Equals (Position (toAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 1208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Position (toAddr c))
+parseInstructions (OpCode 2108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Position (toAddr c))
+parseInstructions (OpCode 2208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Position (toAddr c))
+
+-- Relative destination
+parseInstructions (OpCode 20007:a:b:c:xs) = LessThan (Position (toAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 20107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21007:a:b:c:xs) = LessThan (Position (toAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+
+parseInstructions (OpCode 20207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22007:a:b:c:xs) = LessThan (Position (toAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22107:a:b:c:xs) = LessThan (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22207:a:b:c:xs) = LessThan (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+
+parseInstructions (OpCode 20008:a:b:c:xs) = Equals (Position (toAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 20108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21008:a:b:c:xs) = Equals (Position (toAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+
+parseInstructions (OpCode 20208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Position (toAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22008:a:b:c:xs) = Equals (Position (toAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 21208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Immediate (unOpCode b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22108:a:b:c:xs) = Equals (Immediate (unOpCode a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+parseInstructions (OpCode 22208:a:b:c:xs) = Equals (Relative (toRelAddr a)) (Relative (toRelAddr b)) (Relative (toRelAddr c))
+---
 
 parseInstructions (OpCode 9:a:xs) = ModifyRelBase (Position (toAddr a))
 parseInstructions (OpCode 109:a:xs) = ModifyRelBase (Immediate (unOpCode a))
@@ -548,6 +783,7 @@ part1 = do
       initSystem = initSystemForInput mwords [1]
       result = State.execState runUntilTermination initSystem
   print (logging result)
+  print (output result)
 
 initSystemForInput :: [MWord] -> [MWord] -> System
 initSystemForInput program input = system
