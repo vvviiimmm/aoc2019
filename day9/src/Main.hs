@@ -604,6 +604,9 @@ runInstructionLogged instruction = do
   modify (\s -> s {logging = logging s ++ [show instruction]})
   runInstruction instruction
 
+piLogged :: [OpCode] -> Instruction
+piLogged xs = trace ("op: " ++ show (take 4 xs)) $ parseInstructions xs
+
 parseInstructions :: [OpCode] -> Instruction
 parseInstructions (OpCode 1:a:b:c:xs) = Add (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
 parseInstructions (OpCode 101:a:b:c:xs) = Add (Immediate (unOpCode a)) (Position (toAddr b)) (Position (toAddr c))
@@ -680,7 +683,7 @@ parseInstructions (OpCode 1106:a:b:xs) = JmpIfFalse (Immediate (unOpCode a)) (Im
 parseInstructions (OpCode 206:a:b:xs) = JmpIfFalse (Relative (toRelAddr a)) (Position (toAddr b))
 parseInstructions (OpCode 2006:a:b:xs) = JmpIfFalse (Position (toAddr a)) (Relative (toRelAddr b))
 parseInstructions (OpCode 1206:a:b:xs) = JmpIfFalse (Relative (toRelAddr a)) (Immediate (unOpCode b))
-parseInstructions (OpCode 2106:a:b:xs) = JmpIfFalse (Immediate (unOpCode a)) (Immediate (unOpCode b))
+parseInstructions (OpCode 2106:a:b:xs) = JmpIfFalse (Immediate (unOpCode a)) (Relative (toRelAddr b))
 parseInstructions (OpCode 2206:a:b:xs) = JmpIfFalse (Relative (toRelAddr a)) (Relative (toRelAddr b))
 
 parseInstructions (OpCode 7:a:b:c:xs) = LessThan (Position (toAddr a)) (Position (toAddr b)) (Position (toAddr c))
@@ -785,6 +788,14 @@ part1 = do
   print (logging result)
   print (output result)
 
+part2 :: IO ()
+part2 = do
+  input <- readFile "input.txt"
+  let mwords = Prelude.map (\x -> read x :: Integer) (splitOn "," input)
+      initSystem = initSystemForInput mwords [2]
+      result = State.execState runUntilTermination initSystem
+  print (output result)
+
 initSystemForInput :: [MWord] -> [MWord] -> System
 initSystemForInput program input = system
   where
@@ -800,6 +811,7 @@ runAmplifier program previousOutput phaseSetting = out
     initSystem = System initialMemory initRegisters [phaseSetting, previousOutput] [] []
     resultSystem = State.execState runUntilTermination initSystem
     out = head $ output resultSystem
+
 
 main :: IO ()
 main = pure ()
