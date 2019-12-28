@@ -54,7 +54,6 @@ executable day5
 
   -- Modules included in this executable, other than Main.
   other-modules: 
-      Main,
       IntSystem,
       Parsing,
       InstructionExecution,
