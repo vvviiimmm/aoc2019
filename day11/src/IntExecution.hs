@@ -1,10 +1,11 @@
-module IntExecution where 
+module IntExecution where
 
+import Control.Lens
+import Control.Monad.State.Strict
+import InstructionExecution
 import IntSystem
 import Memory
 import Parsing
-import InstructionExecution
-import Control.Monad.State.Strict
 
 instructionSize :: Instruction -> Integer
 instructionSize Add {} = 4
@@ -26,11 +27,9 @@ isIpInstruction _ = False
 
 fetchNextOp :: State System [OpCode]
 fetchNextOp = do
-  s <- get
-  let p = ip (registers s)
-      offsets = [Addr p, Addr (p + 1), Addr (p + 2), Addr (p + 3)] 
-  words <- mapM memFetch offsets :: State System [MWord]
-  pure $ fmap OpCode words  
+  i <- use (registers . ip)
+  words <- mapM memFetch [Addr i, Addr (i + 1), Addr (i + 2), Addr (i + 3)]
+  pure $ fmap OpCode words
 
 step :: State System ()
 step = do
@@ -38,28 +37,27 @@ step = do
   let inst = parseInstructions nextOp
   -- runInstructionLogged (trace (show inst) inst)
   runInstructionLogged inst
-  s <- get
-    -- rewrite with lenses
+  i <- use (registers . ip)
   let is = instructionSize inst
       newIp =
         if isIpInstruction inst
-          then ip (registers s)
-          else ip (registers s) + is
-  modify
-    (\s -> s {registers = (registers s) {halt = inst == Terminate, ip = newIp}})
+          then i
+          else i + is
+  (registers . halt) .= (inst == Terminate)
+  (registers . ip) .= newIp
 
 runUntilTermination :: State System ()
 runUntilTermination = do
-  currentState <- get
-  if halt (registers currentState)
+  h <- use (registers . halt)
+  if h
     then pure ()
-    else do
-      step
-      runUntilTermination
+    else step >> runUntilTermination
 
 runUntil :: (System -> Bool) -> State System ()
 runUntil pred = do
   s <- get
-  if pred s then pure () else do
-    step
-    runUntil pred
+  if pred s
+    then pure ()
+    else do
+      step
+      runUntil pred

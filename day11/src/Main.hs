@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -12,12 +13,13 @@ import Data.List.Split
 import qualified Data.Map as Map
 import Data.Maybe
 import qualified Data.Set as Set
+import Control.Lens
 
 initSystemForInput :: [MWord] -> [MWord] -> System
 initSystemForInput program input = system
   where
     initialMemory = Map.fromList $ zip (fmap Addr [0 ..]) program
-    initRegisters = Registers {relativeBase = 0, ip = 0, halt = False, tick = 0}
+    initRegisters = Registers {_relativeBase = 0, _ip = 0, _halt = False, _tick = 0}
     system = System initialMemory initRegisters input [] []
 
 main :: IO ()
@@ -58,20 +60,22 @@ data SystemWithScreen = SystemWithScreen
   , _cursorDirection :: Direction
   }
 
+-- makeLenses ''SystemWithScreen
+
 systemWithScreenStep :: State SystemWithScreen ()
 systemWithScreenStep = do
   sws <- get
 
   let currentColor = colorAt (_cursor sws) (_field sws)
       terminationPredicate sys =
-        length (output sys) == 2 || halt (registers sys)
+        length (_output sys) == 2 || (_halt (_registers sys))
       -- Color under the cursor is the input to the machine
       provideInput = [fromIntegral (fromEnum currentColor)]
-      intMachineWithInput = (_system sws) {input = provideInput, output = []}
+      intMachineWithInput = (_system sws) {_input = provideInput, _output = []}
       -- Execute the machine until it returns 2 output numbers
       intMachineWithOutput =
         State.execState (runUntil terminationPredicate) intMachineWithInput
-      o = output intMachineWithOutput
+      o = _output intMachineWithOutput
   if null o
     then pure ()
     else do
@@ -154,4 +158,3 @@ part2 = do
         }
       result = State.execState systemWithScreenStep initSystemWithScreen
   forM_ (drawScreen (_field result)) putStrLn
-

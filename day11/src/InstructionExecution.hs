@@ -4,6 +4,7 @@ import IntSystem
 import Memory
 import IntIO
 import Control.Monad.State.Strict
+import Control.Lens
 
 runInstruction :: Instruction -> State System ()
 runInstruction op =
@@ -457,25 +458,20 @@ runInstruction op =
     ModifyRelBase (Immediate a) -> addToRelativeBase a
     ModifyRelBase (Position a) -> memFetch a >>= addToRelativeBase
     ModifyRelBase (Relative a) -> memFetchRelative a >>= addToRelativeBase
-    Terminate -> modify (\s -> s {registers = (registers s) {halt = True}})
+    Terminate -> (registers . halt) .= True
     Unknown x -> pure ()
 
--- Lenses here!
 setIp :: MWord -> State System ()
-setIp newIp = modify (\s -> s {registers = (registers s) {ip = newIp}})
+setIp newIp = (registers . ip) .= newIp 
 
 addToIp :: MWord -> State System ()
-addToIp offset =
-  modify (\s -> s {registers = (registers s) {ip = ip (registers s) + offset}})
+addToIp offset = (registers . ip) += offset
 
 addToRelativeBase :: MWord -> State System ()
-addToRelativeBase offset =
-  modify (\s -> s {registers = (registers s) {relativeBase = relativeBase (registers s) + offset}})
+addToRelativeBase offset = (registers . relativeBase) += offset
 
 runInstructionLogged :: Instruction -> State System ()
 runInstructionLogged instruction = do
-  modify (\s -> s {logging = logging s ++ [show instruction], registers = (registers s) {tick = tick (registers s) + 1}})
+  logging <>= [show instruction]
+  (registers . tick) += 1
   runInstruction instruction
-
--- piLogged :: [OpCode] -> Instruction
--- piLogged xs = trace ("op: " ++ show (take 4 xs)) $ parseInstructions xs

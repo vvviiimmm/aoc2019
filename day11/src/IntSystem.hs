@@ -1,6 +1,9 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module IntSystem where
 
 import qualified Data.Map as Map
+import Control.Lens
 
 type MWord = Integer
 
@@ -19,11 +22,11 @@ instance Show RelAddr where
 newtype OpCode = OpCode { unOpCode :: MWord } deriving (Eq, Show)
 
 data System = System
-  { memory :: Memory
-  , registers :: Registers
-  , input :: [MWord]
-  , output :: [MWord]
-  , logging :: [String]
+  { _memory :: Memory
+  , _registers :: Registers
+  , _input :: [MWord]
+  , _output :: [MWord]
+  , _logging :: [String]
   } deriving (Show)
 
 data Arg
@@ -33,10 +36,10 @@ data Arg
   deriving (Show, Eq)
 
 data Registers = Registers
-  { ip :: MWord -- Instruction pointer
-  , relativeBase :: MWord -- Relative addressing mode
-  , halt :: Bool -- termination flag
-  , tick :: Integer
+  { _ip :: MWord -- Instruction pointer
+  , _relativeBase :: MWord -- Relative addressing mode
+  , _halt :: Bool -- termination flag
+  , _tick :: Integer
   } deriving (Show)
 
 data Instruction
@@ -62,3 +65,7 @@ data Instruction
   | Terminate
   | Unknown { op :: MWord }
   deriving (Show, Eq)
+
+makeLenses ''System
+
+makeLenses ''Registers

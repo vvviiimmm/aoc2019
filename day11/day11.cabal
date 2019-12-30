@@ -69,7 +69,8 @@ executable day5
       base >=4.12 && <4.13,
       split >=0.2.3.3,
       containers,
-      mtl
+      mtl,
+      lens
 
   -- Directories containing source files.
   hs-source-dirs:      src
