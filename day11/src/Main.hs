@@ -22,9 +22,6 @@ initSystemForInput program input = system
     initRegisters = Registers {_relativeBase = 0, _ip = 0, _halt = False, _tick = 0}
     system = System initialMemory initRegisters input [] []
 
-main :: IO ()
-main = part2
-
 -- Day 11
 data Coord = Coord
   { _x :: !Integer
@@ -60,46 +57,37 @@ data SystemWithScreen = SystemWithScreen
   , _cursorDirection :: Direction
   }
 
--- makeLenses ''SystemWithScreen
+makeLenses ''SystemWithScreen
 
 systemWithScreenStep :: State SystemWithScreen ()
 systemWithScreenStep = do
   sws <- get
 
-  let currentColor = colorAt (_cursor sws) (_field sws)
+  let currentColor = colorAt (sws^.cursor) (sws^.field)
       terminationPredicate sys =
-        length (_output sys) == 2 || (_halt (_registers sys))
+        length (sys^.output) == 2 || sys^.registers.halt
       -- Color under the cursor is the input to the machine
       provideInput = [fromIntegral (fromEnum currentColor)]
-      intMachineWithInput = (_system sws) {_input = provideInput, _output = []}
+      intMachineWithInput = sws^.system & (input .~ provideInput) & (output .~ [])
       -- Execute the machine until it returns 2 output numbers
       intMachineWithOutput =
         State.execState (runUntil terminationPredicate) intMachineWithInput
-      o = _output intMachineWithOutput
-  if null o
+  if null (intMachineWithOutput^.output)
     then pure ()
     else do
-      let [colorToPaint, directionToTurn] = o
-          currentPosition = _cursor sws
+      let [colorToPaint, directionToTurn] = intMachineWithOutput^.output
+          currentPosition = sws^.cursor
           newDirection =
-            turn (_cursorDirection sws) (toEnum (fromInteger directionToTurn))
+            turn (sws^.cursorDirection) (toEnum (fromInteger directionToTurn))
           newCursorPosition = moveCursor currentPosition newDirection
       paintPixel currentPosition (toEnum (fromInteger colorToPaint))
-      modify
-        (\s ->
-           s
-           { _system = intMachineWithOutput
-           , _cursor = newCursorPosition
-           , _cursorDirection = newDirection
-           })
+      system .= intMachineWithOutput
+      cursor .= newCursorPosition
+      cursorDirection .= newDirection
       systemWithScreenStep
 
 paintPixel :: Coord -> Color -> State SystemWithScreen ()
-paintPixel coord color = do
-  sws <- get
-  let field = _field sws
-      paintedField = Map.insert coord color field
-  modify (\s -> s {_field = paintedField})
+paintPixel coord color = field %= Map.insert coord color
 
 -- Utilize enum representation to implement turning as a modulo 4 addition
 -- e.g. DUp + CW = DRight, DDown + CCW = DRight
@@ -142,7 +130,7 @@ part1 = do
         , _cursorDirection = DUp
         }
       result = State.execState systemWithScreenStep initSystemWithScreen
-  print (length $ _field result)
+  print (length $ result^.field)
 
 part2 :: IO ()
 part2 = do
@@ -157,4 +145,7 @@ part2 = do
         , _cursorDirection = DUp
         }
       result = State.execState systemWithScreenStep initSystemWithScreen
-  forM_ (drawScreen (_field result)) putStrLn
+  forM_ (drawScreen (result^.field)) putStrLn
+
+main :: IO ()
+main = part2
