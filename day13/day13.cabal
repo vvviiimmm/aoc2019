@@ -48,7 +48,7 @@ build-type:          Simple
 extra-source-files:  CHANGELOG.md
 
 
-executable day5
+executable day13
   -- .hs or .lhs file containing the Main module.
   main-is:             Main.hs
 
@@ -56,7 +56,7 @@ executable day5
   other-modules: 
       IntSystem,
       Parsing,
-      InstructionExecution,
+      Interpret,
       Memory,
       IntIO,
       IntExecution
@@ -70,7 +70,9 @@ executable day5
       split >=0.2.3.3,
       containers,
       mtl,
-      lens
+      lens,
+      ansi-terminal,
+      colour
 
   -- Directories containing source files.
   hs-source-dirs:      src

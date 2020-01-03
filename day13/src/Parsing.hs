@@ -133,9 +133,3 @@ parseInstructions (OpCode 209:a:xs) = ModifyRelBase (Relative (toRelAddr a))
 
 parseInstructions (OpCode 99:xs) = Terminate
 parseInstructions z = error (show z)
-
-toAddr :: OpCode -> Addr
-toAddr = Addr . unOpCode
-
-toRelAddr :: OpCode -> RelAddr
-toRelAddr = RelAddr . unOpCode

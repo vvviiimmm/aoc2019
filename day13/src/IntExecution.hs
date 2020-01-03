@@ -2,7 +2,7 @@ module IntExecution where
 
 import Control.Lens
 import Control.Monad.State.Strict
-import InstructionExecution
+import Interpret
 import IntSystem
 import Memory
 import Parsing

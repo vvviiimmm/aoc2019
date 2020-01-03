@@ -66,6 +66,12 @@ data Instruction
   | Unknown { op :: MWord }
   deriving (Show, Eq)
 
+toAddr :: OpCode -> Addr
+toAddr = Addr . unOpCode
+
+toRelAddr :: OpCode -> RelAddr
+toRelAddr = RelAddr . unOpCode
+
 makeLenses ''System
 
 makeLenses ''Registers

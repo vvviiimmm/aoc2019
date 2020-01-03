@@ -1,4 +1,4 @@
-module InstructionExecution where
+module Interpret where
 
 import IntSystem
 import Memory
